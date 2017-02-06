@@ -153,7 +153,7 @@ static void ip6_segment(char *out, const uint16_t *addr, int idx)
  * Given a buffer received from the tunnel interface, extract the destination
  * IP address and generate an AMQP address from the vlan name and the IP address.
  */
-static void get_dest_addr(const unsigned char *buffer, const char *vlan, char *addr, int len)
+static void get_dest_addr(unsigned char *buffer, const char *vlan, char *addr, int len)
 {
     const ip_header_t *hdr = (const ip_header_t*) buffer;
 
@@ -196,6 +196,7 @@ tunnel_t *get_epoll_tunnel(int epoll_fd)
         tunnel = DEQ_NEXT(tunnel);
     }
 
+    return tunnel;
 }
 
 static void br_message_free(br_message_t *brm)
@@ -215,7 +216,6 @@ static void bridge_vlan_read(tunnel_t *tunnel)
     char          *pbuf;
     ssize_t       len;
     char          addr_str[200];
-    int           rc;
 
     while (1) {
         pbuf = (char *)malloc(bufsize);
@@ -238,7 +238,7 @@ static void bridge_vlan_read(tunnel_t *tunnel)
         DEQ_ITEM_INIT(brm);
 
         message = pn_message();
-        get_dest_addr(pbuf, tunnel->vlan, addr_str, 200);
+        get_dest_addr((unsigned char *)pbuf, tunnel->vlan, addr_str, 200);
         pn_message_set_address(message, addr_str);
         body = pn_message_body(message);
         pn_data_clear(body);
@@ -248,7 +248,7 @@ static void bridge_vlan_read(tunnel_t *tunnel)
         // put_binary copies and stores so
         // ok to use pbuf
         len = bufsize;
-        pn_message_encode(message, pbuf, &len);
+        pn_message_encode(message, pbuf, (size_t *)&len);
         brm->msg_data = pbuf;
         brm->msg_len = len; 
 
@@ -268,7 +268,6 @@ static void bridge_vlan_read(tunnel_t *tunnel)
 static int bridge_deliver_in_messages(tunnel_t *tunnel)
 {
     br_message_t *brm;
-    int          len;
     
     sys_mutex_lock(lock);
     brm = DEQ_HEAD(tunnel->in_messages);
@@ -288,6 +287,8 @@ static int bridge_deliver_in_messages(tunnel_t *tunnel)
         brm = DEQ_HEAD(tunnel->in_messages);
     }
     sys_mutex_unlock(lock);
+
+    return(0);
     
 }
 
@@ -305,7 +306,6 @@ static int bridge_send_out_messages(pn_link_t *link)
     uint64_t          dtag;
     br_message_list_t to_send;
     br_message_t      *brm;
-    size_t            offer;
     int               link_credit = pn_link_credit(link);
     int               event_count = 0;
 
@@ -325,7 +325,6 @@ static int bridge_send_out_messages(pn_link_t *link)
         br_tag += DEQ_SIZE(to_send);
     }
 
-    offer = DEQ_SIZE(out_messages);
     sys_mutex_unlock(lock);
 
     // msg_data already encoded
@@ -333,16 +332,17 @@ static int bridge_send_out_messages(pn_link_t *link)
     while (brm) {
         DEQ_REMOVE_HEAD(to_send);
         dtag++;
-        pn_delivery_t *dlv = pn_delivery(link, pn_dtag((const char*)&dtag, sizeof(dtag)));
+        pn_delivery(link, pn_dtag((const char*)&dtag, sizeof(dtag)));
         pn_link_send(link, brm->msg_data, brm->msg_len);
         pn_link_advance(link);
-        event_count++;;
+        event_count++;
         br_message_free(brm);
         brm = DEQ_HEAD(to_send);
     }
    
     return event_count;
 }
+
 
 static br_thread_t *thread(int id)
 {
@@ -359,14 +359,13 @@ static br_thread_t *thread(int id)
     return thread;
 }
 
+
 static void *thread_run(void *arg)
 {
     br_thread_t         *thread = (br_thread_t*) arg;
     struct epoll_event  event;
     struct epoll_event  *events;
-    int                 len, ret, nr_events, i, epoll_fd;
-    char                pbuf[BUFSIZE];
-    char                addr_str[200];
+    int                 ret, nr_events, i, epoll_fd;
     
     if (!thread)
         return 0;
@@ -419,7 +418,7 @@ static void *thread_run(void *arg)
             }
                 
             if (events[i].events & EPOLLHUP) {
-                printf("Epoll on on fd %ld hangup\n",
+                printf("Epoll on fd %d hangup\n",
                        events[i].data.fd);
                 free(events);
                 return 0;
@@ -437,8 +436,7 @@ static void *thread_run(void *arg)
                 } else {
                     const size_t s = 32;
                     char buffer[s];
-                    int len;
-                    len = read(tunnel->evt_fd, buffer, s);
+                    read(tunnel->evt_fd, buffer, s);
                     bridge_deliver_in_messages(tunnel);
                 }
             }
@@ -448,10 +446,12 @@ static void *thread_run(void *arg)
     
     free (events);
     close (tunnel->vlan_fd);
-    if (thread->canceled)
-        return 0;
-    
+    /*    if (thread->canceled)
+          return 0; */
+
+    return 0;
 }
+
 
 static void thread_start(br_thread_t *thread)
 {
@@ -461,7 +461,7 @@ static void thread_start(br_thread_t *thread)
     thread->using_thread = 1;
     thread->thread = sys_thread(thread_run, (void*) thread);
 }
-
+/*
 static void thread_cancel(br_thread_t *thread)
 {
     if (!thread)
@@ -470,6 +470,7 @@ static void thread_cancel(br_thread_t *thread)
     thread->running  = 0;
     thread->canceled = 1;
 }
+*/
 
 static void thread_join(br_thread_t *thread)
 {
@@ -482,6 +483,7 @@ static void thread_join(br_thread_t *thread)
     }
 }
 
+/*
 static void thread_free(br_thread_t *thread)
 {
     if (!thread)
@@ -489,6 +491,7 @@ static void thread_free(br_thread_t *thread)
 
     free(thread);
 }
+*/
 
 static void check_condition(pn_event_t *e, pn_condition_t *cond) {
   if (pn_condition_is_set(cond)) {
@@ -559,7 +562,7 @@ static void handle(pn_event_t* event) {
 
             pn_message_decode(msg, pbuf, len);
             body = pn_message_body(msg);
-            pn_data_format(body, pbuf, &len);
+            pn_data_format(body, pbuf,(size_t *) &len);
             
             brm->msg_data = pbuf;
             brm->msg_len = len;
@@ -586,6 +589,10 @@ static void handle(pn_event_t* event) {
     case PN_LINK_FLOW: {
         // The remote has given us credit to send a message
         bridge_send_out_messages(sender);
+    } break;
+
+    case PN_PROACTOR_TIMEOUT: {
+        pn_connection_wake(pn_session_connection(pn_link_session(sender)));
     } break;
 
     case PN_CONNECTION_WAKE: {
@@ -624,7 +631,7 @@ static void handle(pn_event_t* event) {
 static tunnel_t *bridge_add_tunnel(int idx)
 {
     tunnel_t *tunnel = NEW(tunnel_t);
-    memset (tunnel, 0, sizeof(tunnel));
+    memset (tunnel, 0, sizeof(tunnel_t));
     DEQ_ITEM_INIT(tunnel);
     DEQ_INIT(tunnel->in_messages);
        
@@ -687,9 +694,9 @@ int bridge_setup (const char* address, const char *container, const char *ns_pid
 
     /* Parse the URL or use default values */
     pn_url_t *url = urlstr ? pn_url_parse(urlstr) : NULL;
-    const char *host = url ? pn_url_get_host(url) : NULL;
-    const char *port = url ? pn_url_get_port(url) : "amqp";    
-    
+    //    const char *host = url ? pn_url_get_host(url) : NULL;
+    //    const char *port = url ? pn_url_get_port(url) : "amqp";
+
     proactor = pn_proactor();
     conn = pn_connection();
     pn_proactor_connect(proactor, conn, address, "5672");
@@ -714,7 +721,7 @@ int bridge_run(int wait)
     br_thread = thread(1);
     
     thread_start(br_thread);
-    
+
     do {
         pn_event_batch_t *events = pn_proactor_wait(proactor);
         pn_event_t *e;
