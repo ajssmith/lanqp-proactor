@@ -23,7 +23,7 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <unistd.h>
-#include <qpid/dispatch/threading.h>
+#include "threading.h"
 #include "netns.h"
 
 int tun_open(const char *d);
