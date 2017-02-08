@@ -76,8 +76,7 @@ typedef struct ip_header_t {
 // outbound, decoded on inbound
 typedef struct br_message_t {
     DEQ_LINKS(struct br_message_t);
-    char   *msg_data;
-    size_t msg_len;
+    pn_bytes_t mbuf;
 } br_message_t;
 
 DEQ_DECLARE(br_message_t, br_message_list_t);
@@ -201,11 +200,38 @@ tunnel_t *get_epoll_tunnel(int epoll_fd)
 
 static void br_message_free(br_message_t *brm)
 {
-    if (brm->msg_data) {
-        free(brm->msg_data);
+    if (brm->mbuf.start) {
+        free((void *)brm->mbuf.start);
     }
     free(brm);
 }
+
+/*
+static void decode_amqp(br_message_t *brm)
+{
+    pn_message_t *msg;
+    int err;
+    pn_data_t* body;
+    pn_bytes_t bytes;
+    br_message_t *brmi;
+
+    brmi = NEW(br_message_t);
+    brmi->mbuf = pn_bytes(BUFSIZE, (char *)malloc(BUFSIZE));
+    
+    msg = pn_message();
+    err = pn_message_decode(msg, brm->mbuf.start, brm->mbuf.size);
+    if (err != 0) {
+        printf("message decode error \n");
+    }
+
+    body = pn_message_body(msg);
+    pn_data_next(body);
+    bytes = pn_data_get_binary(body);
+
+    memcpy((char *)brmi->mbuf.start,(char *)bytes.start, bytes.size);
+    br_message_free(brmi);
+}
+*/
 
 static void bridge_vlan_read(tunnel_t *tunnel)
 {
@@ -213,15 +239,17 @@ static void bridge_vlan_read(tunnel_t *tunnel)
     pn_data_t     *body;
     br_message_t  *brm;
     pn_message_t  *message;
-    char          *pbuf;
-    ssize_t       len;
     char          addr_str[200];
+    size_t        len;
 
     while (1) {
-        pbuf = (char *)malloc(bufsize);
-        len = read(tunnel->vlan_fd, pbuf, MTU);
+        brm = NEW(br_message_t);
+        DEQ_ITEM_INIT(brm);
+
+        brm->mbuf = pn_bytes(bufsize, (char*)malloc(bufsize)); 
+        len = read(tunnel->vlan_fd, (char *)brm->mbuf.start, brm->mbuf.size);
         if (len == -1) {
-            free(pbuf);
+            br_message_free(brm);
             if (errno == EAGAIN || errno == EINTR) {
                 // epoll vlan_fd is level so should
                 // not need to re-activate
@@ -230,28 +258,26 @@ static void bridge_vlan_read(tunnel_t *tunnel)
         }
         
         if (len < 20) {
-            free(pbuf);
+            br_message_free(brm);
             continue;
+        } else {
+            brm->mbuf.size = len;
         }
-
-        brm = NEW(br_message_t);
-        DEQ_ITEM_INIT(brm);
-
+        
         message = pn_message();
-        get_dest_addr((unsigned char *)pbuf, tunnel->vlan, addr_str, 200);
+        get_dest_addr((unsigned char *)brm->mbuf.start, tunnel->vlan, addr_str, 200);
         pn_message_set_address(message, addr_str);
         body = pn_message_body(message);
         pn_data_clear(body);
-        pn_data_put_binary(body, pn_bytes(len, pbuf));
+        pn_data_put_binary(body, brm->mbuf);
         pn_data_exit(body);
 
         // put_binary copies and stores so
         // ok to use pbuf
-        len = bufsize;
-        pn_message_encode(message, pbuf, (size_t *)&len);
-        brm->msg_data = pbuf;
-        brm->msg_len = len; 
-
+        brm->mbuf.size = bufsize;
+        pn_message_encode(message, (char *)brm->mbuf.start, &brm->mbuf.size);
+        //decode_amqp(brm);
+        
         sys_mutex_lock(lock);
         DEQ_INSERT_TAIL(out_messages, brm);
         sys_mutex_unlock(lock);
@@ -268,12 +294,16 @@ static void bridge_vlan_read(tunnel_t *tunnel)
 static int bridge_deliver_in_messages(tunnel_t *tunnel)
 {
     br_message_t *brm;
+    int len;
     
     sys_mutex_lock(lock);
     brm = DEQ_HEAD(tunnel->in_messages);
     while (brm) {
-        /*
-        len = write(tunnel->vlan_fd, brm->msg_data, brm->msg_len);
+        
+        len = write(tunnel->vlan_fd, brm->mbuf.start, brm->mbuf.size);
+        if (len == 0) {
+            printf("wrote to tunnel \n");
+        }
         if (len == -1) {
             if (errno == EAGAIN || errno == EINTR) {
                 // fd socket is not accepting writes, come back
@@ -281,7 +311,7 @@ static int bridge_deliver_in_messages(tunnel_t *tunnel)
                 break;
             }
         }
-        */    
+            
         DEQ_REMOVE_HEAD(tunnel->in_messages);
         br_message_free(brm);
         brm = DEQ_HEAD(tunnel->in_messages);
@@ -333,7 +363,7 @@ static int bridge_send_out_messages(pn_link_t *link)
         DEQ_REMOVE_HEAD(to_send);
         dtag++;
         pn_delivery(link, pn_dtag((const char*)&dtag, sizeof(dtag)));
-        pn_link_send(link, brm->msg_data, brm->msg_len);
+        pn_link_send(link, brm->mbuf.start, brm->mbuf.size);
         pn_link_advance(link);
         event_count++;
         br_message_free(brm);
@@ -543,38 +573,37 @@ static void handle(pn_event_t* event) {
         pn_record_t   *record;
         tunnel_t      *tunnel;
         size_t        bufsize = BUFSIZE;
-        char          *pbuf;
         ssize_t       len;
         br_message_t  *brm;
         pn_message_t  *msg;
         pn_data_t     *body;
+        pn_bytes_t    data;
 
         if (pn_delivery_readable(dlv) && !pn_delivery_partial(dlv)) {
-            link = pn_delivery_link(dlv);
-            pbuf = (char *)malloc(bufsize);
-            
-            len = pn_link_recv(link, pbuf, bufsize);
-
             brm = NEW(br_message_t);
             DEQ_ITEM_INIT(brm);
 
+            brm->mbuf = pn_bytes(bufsize, (char *)malloc(bufsize));
+            link = pn_delivery_link(dlv);
+            
+            len = pn_link_recv(link, (char *) brm->mbuf.start, brm->mbuf.size);
+
             msg = pn_message();
 
-            pn_message_decode(msg, pbuf, len);
+            pn_message_decode(msg, brm->mbuf.start, len);
             body = pn_message_body(msg);
-            pn_data_format(body, pbuf,(size_t *) &len);
+            pn_data_next(body);
+            data = pn_data_get_binary(body);
+
+            memcpy((char *)brm->mbuf.start,(char *)data.start, data.size);
+            brm->mbuf.size = data.size;
             
-            brm->msg_data = pbuf;
-            brm->msg_len = len;
-            
-            // decode the message, get the tunnel
             record = pn_link_attachments(link);
             tunnel = (tunnel_t *)pn_record_get(record, PN_LEGCTX);
             
             // Accept the delivery and move to the next
             pn_link_advance(link);
             pn_link_flow(link, 1);
-
             
             sys_mutex_lock(lock);
             DEQ_INSERT_TAIL(tunnel->in_messages, brm);
@@ -583,6 +612,7 @@ static void handle(pn_event_t* event) {
 
             // done with the delivery
             pn_delivery_settle(dlv);
+            pn_message_free(msg);
         }
     } break;
         

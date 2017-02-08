@@ -18,6 +18,9 @@
 #
 cmake_minimum_required(VERSION 3.4)
 
+# Pull in local cmake modules
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/tools/cmake/Modules/")
+
 find_package(Proton REQUIRED)
 find_package(Libuv  REQUIRED)
 find_library(pthread_lib pthread)
