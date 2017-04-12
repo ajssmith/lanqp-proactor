@@ -184,7 +184,7 @@ static void daemon_process(const char *ns_pid, const char *pidfile, const char *
 
 int main(int argc, char **argv)
 {
-    const char *address = "127.0.0.1";
+    const char *address = "127.0.0.1:amqp";
     const char *ns_pid  = 0;
     const char *pidfile = 0;
     const char *user    = 0;

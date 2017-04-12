@@ -16,18 +16,15 @@
 # specific language governing permissions and limitations
 # under the License.
 #
-cmake_minimum_required(VERSION 3.4)
-
-# Pull in local cmake modules
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/tools/cmake/Modules/")
+cmake_minimum_required(VERSION 2.8.7)
 
 find_package(Proton REQUIRED)
-find_package(Libuv  REQUIRED)
 find_library(pthread_lib pthread)
+include(CheckIncludeFiles)
+include(CheckCCompilerFlag)
 
 set (lanqp-proactor_SOURCES
      src/bridge.c
-     src/libuv_proactor.c
      src/main.c
      src/netns.c
      src/threading.c
@@ -37,17 +34,9 @@ set (lanqp-proactor_SOURCES
 set_source_files_properties (
   ${lanqp-proactor_SOURCES}
   PROPERTIES
-  COMPILE_FLAGS "${COMPILE_WARNING_FLAGS} -Wall ${COMPILE_PLATFORM_FLAGS} ${COMPILE_LANGUAGE_FLAGS} ${LINK_TIME_OPTIMIZATION}"
+  COMPILE_FLAGS "${COMPILE_WARNING_FLAGS} ${WERROR} ${COMPILE_PLATFORM_FLAGS} ${LINK_TIME_OPTIMIZATION}"
   )
 
-if (BUILD_WITH_CXX)
-  set_source_files_properties (
-    ${lanqp-proactor_SOURCES}
-    PROPERTIES LANGUAGE CXX
-    )
-endif (BUILD_WITH_CXX)
-
-include(CheckIncludeFiles)
 check_include_files("linux/if_tun.h" HAVE_LINUX_IF_TUN_H)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 
@@ -59,5 +48,7 @@ include_directories(
 
 add_executable(lanqp-proactor ${lanqp-proactor_SOURCES})
 target_link_libraries(lanqp-proactor ${Proton_LIBRARIES})
-target_link_libraries(lanqp-proactor ${Libuv_LIBRARIES})
+target_link_libraries(lanqp-proactor ${ProtonCore_LIBRARIES})
+target_link_libraries(lanqp-proactor ${ProtonProactor_LIBRARIES})
+target_link_libraries(lanqp-proactor ${PLATFORM_LIBS})
 target_link_libraries(lanqp-proactor pthread)

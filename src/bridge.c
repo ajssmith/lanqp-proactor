@@ -729,7 +729,7 @@ int bridge_setup (const char* address, const char *container, const char *ns_pid
 
     proactor = pn_proactor();
     conn = pn_connection();
-    pn_proactor_connect(proactor, conn, address, "5672");
+    pn_proactor_connect(proactor, conn, address);
 
     if (url) pn_url_free(url);    
       
