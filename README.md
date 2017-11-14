@@ -40,7 +40,8 @@ Build the lanqp-proactor application to tunnel packets over AMQP.
     make
 
 # Test the lanqp-proactor capability
-Create two tunnel devices.
+Create two tunnel devices.  Feel free to use an alternative
+unprivileged user instead of `rlucente`.
 
     sudo tunctl -t lanq0 -n -u rlucente
     sudo ifconfig lanq0 10.254.1.1 netmask 255.255.0.0 up
