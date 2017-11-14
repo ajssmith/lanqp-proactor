@@ -17,28 +17,24 @@ The lanqp-proactor executable also relies on the following environment variables
 | LANQP_IF_COUNT | Number of interfaces with first interface starting at 0 |
 | LANQP_IFn_NAME | The interface name where n >= 0 (default is `lanq0`) |
 
-# Base Install
-Install Fedora 27 Workstation.  After install,
+# Prerequisites
+Install Fedora 27 Workstation.  Then install packages needed to
+build and run qpid-proton and lanqp-proactor.
 
     sudo dnf -y update
-    sudo dnf -y clean all
-    sudo systemctl reboot
-
-# Build and Install
-After reboot, install packages needed to build qpid-proton and lanqp-proactor.
-
     sudo dnf -y install \
         gcc gcc-c++ make cmake libuuid-devel openssl-devel \
         cyrus-sasl-devel cyrus-sasl-plain cyrus-sasl-md5 swig \
         python-devel ruby-devel rubygem-minitest php-devel \
         perl-devel epydoc doxygen valgrind graphviz \
-        python3-tox tunctl
+        python3-tox tunctl qpid-dispatch-tools \
+        qpid-dispatch-router
+    sudo dnf -y clean all
+    sudo systemctl reboot
 
-Install packages needed to run the dispatch router.
-
-    sudo dnf -y install qpid-dispatch-tools qpid-dispatch-router
-
-Build and install a newer version of qpid-proton.
+# Build and Install
+Build and install a newer version of qpid-proton since its needed
+by lanqp-proactor.
 
     git clone https://github.com/apache/qpid-proton.git -b 0.18.1
     cd qpid-proton
@@ -58,7 +54,7 @@ Build the lanqp-proactor application to tunnel packets over AMQP.
     cmake ..
     make
 
-# Test the lanqp-proactor capability
+# Test
 Create two tunnel devices.  Feel free to use an alternative
 unprivileged user instead of `rlucente`.
 
@@ -72,7 +68,8 @@ Start the qpid-dispatch router.
 
     sudo systemctl start qdrouterd
 
-Configure and start lanqp-proactor.
+Configure and start lanqp-proactor which will bring up the tun
+interfaces.
 
     export LANQP_IF_COUNT=2
     export LANQP_IF0_NAME=lanq0
