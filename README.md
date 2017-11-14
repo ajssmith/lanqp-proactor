@@ -57,5 +57,5 @@ Configure and start lanqp-proactor.
     export LANQP_IF_COUNT=2
     export LANQP_IF0_NAME=lanq0
     export LANQP_IF1_NAME=lanq1
-    ./lanqp-proactor -a localhost:amqp
+    ./lanqp-proactor -a localhost:amqp -d
 
