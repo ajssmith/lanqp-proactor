@@ -1,3 +1,22 @@
+# Overview
+LanQP enables tunnelling of packets over an AMQP router network.
+The lanqp-proactor executable relies on the following command line
+options:
+
+| Option | Description |
+| ------ | ----------- |
+| -a <address> | The address of the AMQ Interconnect network connection in form `host:port` |
+| -d | Daemonize the process |
+| -P <file> | The PID file for the daemonized process |
+| -U <user> | The user for the daemon to run as |
+
+The lanqp-proactor executable also relies on the following environment variables:
+
+| Env Var | Description |
+| ------- | ----------- |
+| LANQP_IF_COUNT | number of interfaces with first interface starting at 0 |
+| LANQP_IFn_NAME | where n >= 0 (default is “lanq0”) |
+
 # Base Install
 Install Fedora 27 Workstation.  After install,
 
