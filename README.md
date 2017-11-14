@@ -70,7 +70,7 @@ unprivileged user instead of `rlucente`.
 
 Start the qpid-dispatch router.
 
-    sudo qdrouterd -d
+    sudo systemctl start qdrouterd
 
 Configure and start lanqp-proactor.
 
@@ -78,4 +78,12 @@ Configure and start lanqp-proactor.
     export LANQP_IF0_NAME=lanq0
     export LANQP_IF1_NAME=lanq1
     ./lanqp-proactor -a localhost:amqp -d
+
+# Cleanup
+To shut it all down and remove the tunnel devices:
+
+    pkill lanqp
+    sudo systemctl stop qdrouterd
+    sudo ip tuntap del mode tun name lanq0
+    sudo ip tuntap del mode tun name lanq1
 
