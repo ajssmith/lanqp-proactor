@@ -12,7 +12,8 @@ After reboot, install packages needed to build qpid-proton and lanqp-proactor.
         gcc gcc-c++ make cmake libuuid-devel openssl-devel \
         cyrus-sasl-devel cyrus-sasl-plain cyrus-sasl-md5 swig \
         python-devel ruby-devel rubygem-minitest php-devel \
-        perl-devel epydoc doxygen valgrind graphviz python3-tox
+        perl-devel epydoc doxygen valgrind graphviz \
+        python3-tox tunctl
 
 Install packages needed to run the dispatch router.
 
@@ -49,7 +50,7 @@ Create two tunnel devices.
 
 Start the qpid-dispatch router.
 
-    sudo qdrouterd &
+    sudo qdrouterd -d
 
 Configure and start lanqp-proactor.
 
