@@ -15,7 +15,7 @@ The lanqp-proactor executable also relies on the following environment variables
 | Env Var | Description |
 | ------- | ----------- |
 | LANQP_IF_COUNT | Number of tun interfaces |
-| LANQP_IFn_NAME | The interface name where n >= 0 (default is `lanq0`) |
+| LANQP_IFn_NAME | The tun interface name where n >= 0 (default is `lanq0`) |
 
 # Prerequisites
 Install Fedora 27 Workstation.  Then install packages needed to
