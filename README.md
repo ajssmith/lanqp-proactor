@@ -5,7 +5,7 @@ options:
 
 | Option | Description |
 | ------ | ----------- |
-| -a <address> | The address of the AMQ Interconnect network connection in form `host:port` |
+| -a <address> | The address of the AMQ Interconnect network connection in the form `host:port` |
 | -d | Daemonize the process |
 | -P <file> | The PID file for the daemonized process |
 | -U <user> | The user for the daemon to run as |
