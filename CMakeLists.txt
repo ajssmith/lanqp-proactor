@@ -52,3 +52,7 @@ target_link_libraries(lanqp-proactor ${ProtonCore_LIBRARIES})
 target_link_libraries(lanqp-proactor ${ProtonProactor_LIBRARIES})
 target_link_libraries(lanqp-proactor ${PLATFORM_LIBS})
 target_link_libraries(lanqp-proactor pthread)
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lanqp-proactor
+        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_READ WORLD_WRITE WORLD_EXECUTE
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/local/bin)
