@@ -34,7 +34,6 @@
 #include <errno.h>
 
 #include <proton/connection.h>
-#include <proton/connection_driver.h>
 #include <proton/delivery.h>
 #include <proton/event.h>
 #include <proton/link.h>
