@@ -17,5 +17,4 @@
  * under the License.
  */
 
-int bridge_run(int wait);
-int bridge_setup(const char* address, const char *container, const char *ns_pid);
+int bridge_run(const char* address, const char *container, const char *ns_pid);

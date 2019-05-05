@@ -80,7 +80,6 @@ typedef struct br_message_t {
 
 DEQ_DECLARE(br_message_t, br_message_list_t);
 
-
 typedef struct tunnel_t {
     DEQ_LINKS(struct tunnel_t);
     const char        *name;
@@ -105,17 +104,15 @@ typedef struct br_thread_t {
     sys_thread_t *thread;    
 } br_thread_t;
 
-
 // Bridge driver
-//pn_connection_t   *conn;
-pn_proactor_t     *proactor;
-sys_mutex_t       *lock;
-br_message_list_t out_messages;
-uint64_t          br_tag = 1;
-tunnel_list_t     tunnels;
-br_thread_t       *br_thread;
-int               tunnel_count;
-bool              finished = false;
+static pn_proactor_t     *proactor;
+static sys_mutex_t       *lock;
+static br_message_list_t out_messages;
+static uint64_t          br_tag = 1;
+static tunnel_list_t     tunnels;
+static br_thread_t       *br_thread;
+static int               tunnel_count;
+static bool              stopping=false;
 
 int exit_code = 0;
 
@@ -171,7 +168,6 @@ static void get_dest_addr(unsigned char *buffer, const char *vlan, char *addr, i
                  seg[0], seg[1], seg[2], seg[3], seg[4], seg[5], seg[6], seg[7]);
     }
 }
-
 
 static const char *bridge_get_env(const char *suffix, int idx)
 {
@@ -330,7 +326,6 @@ int bridge_activate_tunnel(tunnel_t *tunnel)
     return 0;
 }
 
-
 static int bridge_send_out_messages(pn_link_t *link)
 {
     uint64_t          dtag;
@@ -373,7 +368,6 @@ static int bridge_send_out_messages(pn_link_t *link)
     return event_count;
 }
 
-
 static br_thread_t *thread(int id)
 {
     br_thread_t *thread = NEW(br_thread_t);
@@ -384,11 +378,9 @@ static br_thread_t *thread(int id)
     thread->running      = 0;
     thread->canceled     = 0;
     thread->using_thread = 0;
-    
 
     return thread;
 }
-
 
 static void *thread_run(void *arg)
 {
@@ -455,6 +447,7 @@ static void *thread_run(void *arg)
             }
 
             if (events[i].events & EPOLLOUT) {
+                printf("deliver in messages \n");
                 tunnel_t *tunnel = get_epoll_tunnel(events[i].data.fd);
                 bridge_deliver_in_messages(tunnel);
             }
@@ -462,6 +455,7 @@ static void *thread_run(void *arg)
             if (events[i].events & EPOLLIN) {
                 tunnel_t *tunnel = get_epoll_tunnel(events[i].data.fd);
                 if (events[i].data.fd == tunnel->vlan_fd) {
+                    printf("vlan read tunnel \n");
                     bridge_vlan_read(tunnel);
                 } else {
                     const size_t s = 32;
@@ -481,7 +475,6 @@ static void *thread_run(void *arg)
 
     return 0;
 }
-
 
 static void thread_start(br_thread_t *thread)
 {
@@ -531,7 +524,7 @@ static void check_condition(pn_event_t *e, pn_condition_t *cond) {
   }
 }
 
-static void handle(pn_event_t* event) {
+static bool handle(pn_event_t* event) {
 
     switch (pn_event_type(event)) {
 
@@ -653,12 +646,13 @@ static void handle(pn_event_t* event) {
         pn_connection_close(pn_event_connection(event));
         break;
 
-    case PN_PROACTOR_INACTIVE:
-        finished = true;
-        break;
+    case PN_PROACTOR_INACTIVE: {
+        return false;
+    }
         
     default: break;
     }
+    return true;
 }
 
 static tunnel_t *bridge_add_tunnel(int idx)
@@ -668,11 +662,11 @@ static tunnel_t *bridge_add_tunnel(int idx)
     DEQ_ITEM_INIT(tunnel);
     DEQ_INIT(tunnel->in_messages);
        
-    tunnel->name     = bridge_get_env("NAME", idx);
-    tunnel->ns_pid   = bridge_get_env("PID",  idx);
-    tunnel->vlan     = bridge_get_env("VLAN", idx);
-    tunnel->ip_addr  = bridge_get_env("IP",   idx);
-    tunnel->ip6_addr = bridge_get_env("IP6",  idx);
+    tunnel->name        = bridge_get_env("NAME", idx);
+    tunnel->ns_pid      = bridge_get_env("PID",  idx);
+    tunnel->vlan        = bridge_get_env("VLAN", idx);
+    tunnel->ip_addr     = bridge_get_env("IP",   idx);
+    tunnel->ip6_addr    = bridge_get_env("IP6",  idx);
 
     if (!tunnel->name)
         tunnel->name = "lanq0";
@@ -701,8 +695,16 @@ static tunnel_t *bridge_add_tunnel(int idx)
        
     return tunnel;
 }
-        
-int bridge_setup (const char* address, const char *container, const char *ns_pid)
+
+void bridge_exit()
+{
+    // close all tunnels and event fds
+    //    close(evt_fd);
+    sys_mutex_free(lock);
+}
+
+
+int bridge_eventloop(const char* address, const char *container, const char *ns_pid)
 {
     const char *env = getenv("LANQP_IF_COUNT");
     const char* urlstr = NULL;
@@ -732,38 +734,42 @@ int bridge_setup (const char* address, const char *container, const char *ns_pid
     //    const char *port = url ? pn_url_get_port(url) : "amqp";
 
     proactor = pn_proactor();
-    conn = pn_connection();
-    pn_proactor_connect(proactor, conn, address);
+    while (!stopping) {
+        pn_proactor_connect2(proactor, NULL, NULL, address);
+        bool engine_running = true;
+        while (engine_running && !stopping) {
+            pn_event_batch_t *events = pn_proactor_wait(proactor);
+            pn_event_t *e;
+            while ((e = pn_event_batch_next(events))) {
+                engine_running = handle(e);
+                if (!engine_running) {
+                    printf("Engine not running \n");
+                    break;
+                }
+            }
+            pn_proactor_done(proactor, events);
+        }
 
-    if (url) pn_url_free(url);    
-      
+        // TODO: any free or release needed prior to retry?
+        int delay = 5;
+        while (delay-- > 0 && !stopping) {
+          sleep(1.0);
+        }
+    }
+    printf("Proactor disconnect, leaving event loop\n");
+    pn_proactor_disconnect(proactor, NULL);
+
     return 0;
-
 }
 
-void bridge_exit()
-{
-    // close all tunnels and event fds
-    //    close(evt_fd);
-    sys_mutex_free(lock);
-}
-
-
-int bridge_run(int wait)
+int bridge_run(const char* address, const char *container, const char *ns_pid)
 {
 
     br_thread = thread(1);
     
     thread_start(br_thread);
 
-    do {
-        pn_event_batch_t *events = pn_proactor_wait(proactor);
-        pn_event_t *e;
-        while ((e = pn_event_batch_next(events))) {
-            handle(e);
-        }
-        pn_proactor_done(proactor, events);
-    } while (!finished);
+    bridge_eventloop(address, container, ns_pid);
     
     thread_join(br_thread);
 

@@ -33,16 +33,12 @@ static void main_process(const char *ns_pid, const char *address, int fd)
 {
     const char *container = "LanQPreactor";
    
-    if (bridge_setup(address, container, ns_pid) < 0)
-        exit(1);
-
     if (fd > 0) {
         write(fd, "0", 1); // Success signal
         close(fd);
     }
 
-    bridge_run(500000);
-   
+    bridge_run(address, container, ns_pid);
 }
 
 static void daemon_process(const char *ns_pid, const char *pidfile, const char *address, const char *user)
