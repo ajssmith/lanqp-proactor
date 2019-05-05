@@ -447,7 +447,6 @@ static void *thread_run(void *arg)
             }
 
             if (events[i].events & EPOLLOUT) {
-                printf("deliver in messages \n");
                 tunnel_t *tunnel = get_epoll_tunnel(events[i].data.fd);
                 bridge_deliver_in_messages(tunnel);
             }
@@ -455,7 +454,6 @@ static void *thread_run(void *arg)
             if (events[i].events & EPOLLIN) {
                 tunnel_t *tunnel = get_epoll_tunnel(events[i].data.fd);
                 if (events[i].data.fd == tunnel->vlan_fd) {
-                    printf("vlan read tunnel \n");
                     bridge_vlan_read(tunnel);
                 } else {
                     const size_t s = 32;
@@ -743,7 +741,6 @@ int bridge_eventloop(const char* address, const char *container, const char *ns_
             while ((e = pn_event_batch_next(events))) {
                 engine_running = handle(e);
                 if (!engine_running) {
-                    printf("Engine not running \n");
                     break;
                 }
             }
@@ -756,7 +753,6 @@ int bridge_eventloop(const char* address, const char *container, const char *ns_
           sleep(1.0);
         }
     }
-    printf("Proactor disconnect, leaving event loop\n");
     pn_proactor_disconnect(proactor, NULL);
 
     return 0;
