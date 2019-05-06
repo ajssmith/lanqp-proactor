@@ -116,7 +116,7 @@ tunnel_list_t     tunnels;
 br_thread_t       *br_thread;
 int               tunnel_count;
 bool              finished = false;
-
+bool              stopping = false;
 int exit_code = 0;
 
 static void ip6_segment(char *out, const uint16_t *addr, int idx)
@@ -531,7 +531,7 @@ static void check_condition(pn_event_t *e, pn_condition_t *cond) {
   }
 }
 
-static void handle(pn_event_t* event) {
+static bool handle(pn_event_t* event) {
 
     switch (pn_event_type(event)) {
 
@@ -650,11 +650,12 @@ static void handle(pn_event_t* event) {
         break;
 
     case PN_PROACTOR_INACTIVE:
-        finished = true;
+        return false;
         break;
         
     default: break;
     }
+    return true;
 }
 
 static tunnel_t *bridge_add_tunnel(int idx)
@@ -698,22 +699,30 @@ static tunnel_t *bridge_add_tunnel(int idx)
     return tunnel;
 }
         
-int bridge_setup (const char* address, const char *container, const char *ns_pid)
+void bridge_exit()
+{
+    // close all tunnels and event fds
+    //    close(evt_fd);
+    sys_mutex_free(lock);
+}
+
+int bridge_run(const char* address, const char *container, const char *ns_pid)
 {
     const char *env = getenv("LANQP_IF_COUNT");
     const char* urlstr = NULL;
-    
+    pn_connection_t* conn = NULL;
+
     DEQ_INIT(out_messages);
     DEQ_INIT(tunnels);
     lock = sys_mutex();
-    
+
     if (!env){
         printf("Environment variable LANQP_IF_COUNT not set\n");
         exit(1);
     }  
-    
+
     int idx;
-    tunnel_count = atoi(env);   
+    tunnel_count = atoi(env);
 
     for (idx = 0; idx < tunnel_count; idx++){
         tunnel_t *tunnel = bridge_add_tunnel(idx);
@@ -726,46 +735,40 @@ int bridge_setup (const char* address, const char *container, const char *ns_pid
     //    const char *host = url ? pn_url_get_host(url) : NULL;
     //    const char *port = url ? pn_url_get_port(url) : "amqp";
 
-    proactor = pn_proactor();
-    pn_connection_t *conn = pn_connection();
-    pn_proactor_connect(proactor, conn, address);
-
-    if (url) pn_url_free(url);    
-      
-    return 0;
-
-}
-
-void bridge_exit()
-{
-    // close all tunnels and event fds
-    //    close(evt_fd);
-    sys_mutex_free(lock);
-}
-
-
-int bridge_run(int wait)
-{
-
     br_thread = thread(1);
-    
+
     thread_start(br_thread);
 
-    do {
-        pn_event_batch_t *events = pn_proactor_wait(proactor);
-        pn_event_t *e;
-        while ((e = pn_event_batch_next(events))) {
-            handle(e);
+    proactor = pn_proactor();
+    while (!stopping) {
+        pn_proactor_connect2(proactor, NULL, NULL, address);
+        bool engine_running = true;
+        while (engine_running && !stopping) {
+            pn_event_batch_t *events = pn_proactor_wait(proactor);
+            pn_event_t *e;
+            while ((e = pn_event_batch_next(events))) {
+                engine_running = handle(e);
+                if (!engine_running) {
+                    break;
+                }
+            }
+            pn_proactor_done(proactor, events);
         }
-        pn_proactor_done(proactor, events);
-    } while (!finished);
-    
+
+        // TODO: any free or release needed prior to retry?
+        int delay = 5;
+        while (delay-- > 0 && !stopping) {
+          sleep(1.0);
+        }
+    }
+    pn_proactor_disconnect(proactor, NULL);
+
     thread_join(br_thread);
 
     br_thread->canceled = 0;
 
     bridge_exit();
-          
+
     return 0;
 }
    
