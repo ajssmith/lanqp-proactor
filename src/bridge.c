@@ -108,6 +108,7 @@ typedef struct br_thread_t {
 
 // Bridge driver
 pn_proactor_t     *proactor;
+pn_link_t         *sender;
 sys_mutex_t       *lock;
 br_message_list_t out_messages;
 uint64_t          br_tag = 1;
@@ -238,7 +239,7 @@ static void bridge_vlan_read(tunnel_t *tunnel)
     char            addr_str[200];
     size_t          len;
     pn_session_t    *s = pn_link_session(tunnel->ip_link);
-    pn_connection_t *c= pn_session_connection(s);
+    pn_connection_t *c = pn_session_connection(s);
 
     while (1) {
         brm = NEW(br_message_t);
@@ -539,7 +540,7 @@ static void handle(pn_event_t* event) {
         pn_session_t* s = pn_session(pn_event_connection(event));
         pn_connection_open(c);
         pn_session_open(s);
-        pn_link_t *sender = pn_sender(s, "vlan-sender");
+        sender = pn_sender(s, "vlan-sender");
         pn_link_set_snd_settle_mode(sender, PN_SND_SETTLED);
         pn_link_open(sender);
 
@@ -616,19 +617,15 @@ static void handle(pn_event_t* event) {
     } break;
         
     case PN_LINK_FLOW: {
-        // The remote has given us credit to send a message
-        pn_link_t *sender = pn_event_link(event);
         bridge_send_out_messages(sender);
     } break;
 
     case PN_PROACTOR_TIMEOUT: {
-        pn_link_t *sender = pn_event_link(event);
         pn_connection_wake(pn_session_connection(pn_link_session(sender)));
     } break;
 
     case PN_CONNECTION_WAKE: {
         // There is tunnel data to send
-        pn_link_t *sender = pn_event_link(event);
         bridge_send_out_messages(sender);
     } break;
 
