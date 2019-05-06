@@ -107,10 +107,8 @@ typedef struct br_thread_t {
 
 
 // Bridge driver
-pn_connection_t   *conn;
-pn_session_t      *ssn;
-pn_link_t         *sender;
 pn_proactor_t     *proactor;
+pn_link_t         *sender;
 sys_mutex_t       *lock;
 br_message_list_t out_messages;
 uint64_t          br_tag = 1;
@@ -234,12 +232,14 @@ static void decode_amqp(br_message_t *brm)
 
 static void bridge_vlan_read(tunnel_t *tunnel)
 {
-    size_t        bufsize = BUFSIZE;
-    pn_data_t     *body;
-    br_message_t  *brm;
-    pn_message_t  *message;
-    char          addr_str[200];
-    size_t        len;
+    size_t          bufsize = BUFSIZE;
+    pn_data_t       *body;
+    br_message_t    *brm;
+    pn_message_t    *message;
+    char            addr_str[200];
+    size_t          len;
+    pn_session_t    *s = pn_link_session(tunnel->ip_link);
+    pn_connection_t *c = pn_session_connection(s);
 
     while (1) {
         brm = NEW(br_message_t);
@@ -284,7 +284,7 @@ static void bridge_vlan_read(tunnel_t *tunnel)
         pn_message_free(message);
 
         // activate the amqp sender to call bridge_send_out_messages
-        pn_connection_wake(conn);                      
+        pn_connection_wake(c);
     }
     
     return;
@@ -524,9 +524,10 @@ static void thread_free(br_thread_t *thread)
 
 static void check_condition(pn_event_t *e, pn_condition_t *cond) {
   if (pn_condition_is_set(cond)) {
-    exit_code = 1;
     fprintf(stderr, "%s: %s: %s\n", pn_event_type_name(pn_event_type(e)),
             pn_condition_get_name(cond), pn_condition_get_description(cond));
+    pn_connection_close(pn_event_connection(e));
+    exit_code = 1;
   }
 }
 
@@ -535,11 +536,11 @@ static void handle(pn_event_t* event) {
     switch (pn_event_type(event)) {
 
     case PN_CONNECTION_INIT: {
-        conn = pn_event_connection(event);
-        pn_connection_open(conn);
-        ssn = pn_session(conn);
-        pn_session_open(ssn);
-        sender = pn_sender(ssn, "vlan-sender");
+        pn_connection_t* c = pn_event_connection(event);
+        pn_session_t* s = pn_session(pn_event_connection(event));
+        pn_connection_open(c);
+        pn_session_open(s);
+        sender = pn_sender(s, "vlan-sender");
         pn_link_set_snd_settle_mode(sender, PN_SND_SETTLED);
         pn_link_open(sender);
 
@@ -550,7 +551,7 @@ static void handle(pn_event_t* event) {
             if (tunnel->ip_addr) {
                 // What link attachment or context do we need to set e.g. record
                 char a4[1000];
-                tunnel->ip_link = pn_receiver(ssn, tunnel->name);
+                tunnel->ip_link = pn_receiver(s, tunnel->name);
                 record = pn_link_attachments(tunnel->ip_link);
                 pn_record_set(record, PN_LEGCTX, tunnel);
                 snprintf(a4, 1000, "u/%s/%s", tunnel->vlan, tunnel->ip_addr);
@@ -616,7 +617,6 @@ static void handle(pn_event_t* event) {
     } break;
         
     case PN_LINK_FLOW: {
-        // The remote has given us credit to send a message
         bridge_send_out_messages(sender);
     } break;
 
@@ -628,7 +628,7 @@ static void handle(pn_event_t* event) {
         // There is tunnel data to send
         bridge_send_out_messages(sender);
     } break;
-        
+
     case PN_TRANSPORT_CLOSED:
         check_condition(event, pn_transport_condition(pn_event_transport(event)));
         break;
@@ -727,7 +727,7 @@ int bridge_setup (const char* address, const char *container, const char *ns_pid
     //    const char *port = url ? pn_url_get_port(url) : "amqp";
 
     proactor = pn_proactor();
-    conn = pn_connection();
+    pn_connection_t *conn = pn_connection();
     pn_proactor_connect(proactor, conn, address);
 
     if (url) pn_url_free(url);    
